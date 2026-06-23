@@ -1,125 +1,67 @@
-# PlatformWellSync — Technical Assessment Solution
-
-## Overview
-A .NET 8 Console application that:
-1. Authenticates against the testDemo REST API
-2. Fetches platform/well data using the bearer token
-3. Upserts (insert or update) the data into a SQL Server LocalDB
-4. Is resilient to missing or extra API response fields
+# AEM Enersol - Software Developer Technical Assessment
+**Submitted by:** funmeen  
+**Time taken:** ~3 hours
 
 ---
 
-## Project Structure
+## Part 1: .NET Application
 
+### Approach
+
+Before writing any code, I started by exploring the API through Swagger at `http://test-demo.aemenersol.com/index.html` to understand the data structure. I logged in using the provided credentials, tested the `GetPlatformWellActual` endpoint, and observed the JSON response carefully. This helped me plan the database schema before touching any code.
+
+From the Swagger response I noticed:
+- Each record is a **Platform** object with a nested **well** array inside it
+- The date field is called `lastUpdate`, not `updatedAt`
+- Some platforms have no wells at all (Platform6 to Platform10)
+
+Once I understood the data shape, I designed two tables — Platform and Well — and built the sync logic around that.
+
+### Tech stack
+- .NET 8 Console Application
+- Entity Framework Core (Code First) with SQL Server LocalDB
+- Newtonsoft.Json for resilient JSON deserialization
+- Dependency Injection via `Microsoft.Extensions.DependencyInjection`
+
+### How it works
+1. The app logs in to the API and retrieves a bearer token
+2. It calls `GetPlatformWellActual` using that token
+3. For each platform and its nested wells, it upserts into the database (insert if new, update if exists)
+4. It then calls `GetPlatformWellDummy` to verify the app handles missing or extra JSON fields without breaking
+
+### Resilience to API changes
+All DTO properties are nullable, so missing JSON keys don't cause errors. `[JsonExtensionData]` absorbs any new unknown fields silently. `MissingMemberHandling.Ignore` is set on the deserializer as an extra safety net.
+
+### How to run
 ```
-PlatformWellSync/
-├── Models/
-│   ├── Platform.cs              # Platform entity
-│   └── Well.cs                  # Well entity
-├── Data/
-│   └── AppDbContext.cs          # EF Core DbContext (Code First)
-├── DTOs/
-│   └── ApiDtos.cs               # API request/response DTOs
-├── Services/
-│   ├── ApiService.cs            # Handles login + API calls
-│   └── SyncService.cs           # Handles DB upsert logic
-├── Migrations/
-│   ├── 20240101000000_InitialCreate.cs
-│   └── AppDbContextModelSnapshot.cs
-├── Program.cs                   # Entry point + DI configuration
-├── PlatformWellSync.csproj
-└── Part2_LastUpdatedWellPerPlatform.sql   # PART 2 SQL query
-```
-
----
-
-## Prerequisites
-
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8)
-- SQL Server LocalDB (included with Visual Studio, or install separately)
-- Internet access to reach `http://test-demo.aemenersol.com`
-
----
-
-## How to Run
-
-### 1. Clone / open the project
-
-```bash
-git clone <your-repo-url>
 cd PlatformWellSync
-```
-
-### 2. Restore packages
-
-```bash
 dotnet restore
-```
-
-### 3. Apply EF migrations (creates the LocalDB automatically)
-
-```bash
-dotnet ef database update
-```
-
-Or the app will auto-migrate on startup via `db.Database.MigrateAsync()`.
-
-### 4. Run the application
-
-```bash
 dotnet run
 ```
 
-The app will:
-- Log in as `user@aemenersol.com`
-- Fetch data from `/api/PlatformWell/GetPlatformWellActual`
-- Upsert Platform and Well records into LocalDB
-- Fetch data from `/api/PlatformWell/GetPlatformWellDummy` (resilience test)
-- Upsert again — handles missing/extra keys without breaking
+The app creates the database and tables automatically on first run, then syncs all data.
 
----
+### Hardest part
+The trickiest part was troubleshooting the database and API connection together. The API returned a nested JSON structure (platforms containing wells) which was different from what I initially expected based on the assessment screenshot. I had to inspect the raw API response through Swagger first, then adjust the data models to match the actual structure before the sync worked correctly.
 
-## Database Schema (Code First)
-
-### Platform Table
-| Column       | Type          | Notes                  |
-|--------------|---------------|------------------------|
-| Id           | int (PK)      | From API `platformId`  |
-| PlatformName | nvarchar(200) | Nullable               |
-
-### Well Table
-| Column     | Type          | Notes                    |
-|------------|---------------|--------------------------|
-| Id         | int (PK)      | From API `id`            |
-| PlatformId | int (FK)      | References Platform(Id)  |
-| UniqueName | nvarchar(200) | Nullable                 |
-| Latitude   | float         | Nullable                 |
-| Longitude  | float         | Nullable                 |
-| CreatedAt  | datetime2     | Nullable                 |
-| UpdatedAt  | datetime2     | Nullable                 |
-
----
-
-## Resilience to Missing / Extra Fields
-
-- All DTO properties are **nullable** — missing JSON keys won't throw
-- `[JsonExtensionData]` captures any **new/unknown keys** silently
-- `MissingMemberHandling.Ignore` in `JsonSerializerSettings` prevents crashes
-- SyncService uses null-coalescing (`??`) to keep existing values when keys are absent
+Coming from Python, JavaScript, and PHP, the .NET and Entity Framework setup was also new to me — especially getting the database tables to create properly using Code First.
 
 ---
 
 ## Part 2: SQL Query
 
-See `Part2_LastUpdatedWellPerPlatform.sql`.
-
-Two approaches provided:
-1. **JOIN + subquery** — clean and readable
-2. **ROW_NUMBER() OVER (PARTITION BY)** — handles ties, more robust
+The query returns the last updated well for each platform, matching the expected result from the assessment.
 
 ```sql
-SELECT p.PlatformName, w.Id, w.PlatformId, w.UniqueName,
-       w.Latitude, w.Longitude, w.CreatedAt, w.UpdatedAt
+SELECT
+    p.PlatformName,
+    w.Id,
+    w.PlatformId,
+    w.UniqueName,
+    w.Latitude,
+    w.Longitude,
+    w.CreatedAt,
+    w.UpdatedAt
 FROM Well w
 INNER JOIN Platform p ON p.Id = w.PlatformId
 INNER JOIN (
@@ -127,28 +69,30 @@ INNER JOIN (
     FROM Well
     GROUP BY PlatformId
 ) latest ON w.PlatformId = latest.PlatformId
-        AND w.UpdatedAt = latest.LastUpdatedAt
+       AND w.UpdatedAt = latest.LastUpdatedAt
 ORDER BY p.PlatformName;
 ```
 
----
+The subquery groups wells by platform and finds the most recent `UpdatedAt` value for each. The outer query then joins back to get the full well details for that row.
 
-## Time Taken
-
-**Estimated: ~3–4 hours**
-
-Breakdown:
-- ~30 min: Exploring the API via Swagger, understanding data shape
-- ~45 min: Project setup, EF Code First models, migrations
-- ~60 min: ApiService (login flow, bearer token, resilient deserialization)
-- ~45 min: SyncService (upsert logic, null-safety, logging)
-- ~30 min: Program.cs wiring, DI setup, testing flow
-- ~20 min: Part 2 SQL query + README
+A second alternative using `ROW_NUMBER() OVER (PARTITION BY)` is also included in `Part2_LastUpdatedWellPerPlatform.sql` for cases where multiple wells share the same timestamp.
 
 ---
 
-## Notes
-
-- Code First EF approach used — no manual SQL schema required
-- `ValueGeneratedNever()` is used so EF doesn't try to auto-generate IDs that come from the API
-- The app is a Console project for simplicity, but the same Services/Data layer works in Web API or Worker Service
+## Project Structure
+```
+PlatformWellSync/
+├── Models/
+│   ├── Platform.cs
+│   └── Well.cs
+├── Data/
+│   └── AppDbContext.cs
+├── DTOs/
+│   └── ApiDtos.cs
+├── Services/
+│   ├── ApiService.cs
+│   └── SyncService.cs
+├── Program.cs
+├── PlatformWellSync.csproj
+└── Part2_LastUpdatedWellPerPlatform.sql
+```
