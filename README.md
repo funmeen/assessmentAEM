@@ -53,15 +53,9 @@ Coming from Python, JavaScript, and PHP, the .NET and Entity Framework setup was
 The query returns the last updated well for each platform, matching the expected result from the assessment.
 
 ```sql
-SELECT
-    p.PlatformName,
-    w.Id,
-    w.PlatformId,
-    w.UniqueName,
-    w.Latitude,
-    w.Longitude,
-    w.CreatedAt,
-    w.UpdatedAt
+SELECT p.PlatformName, w.Id, w.PlatformId,
+       w.UniqueName, w.Latitude, w.Longitude,
+       w.CreatedAt, w.UpdatedAt
 FROM Well w
 INNER JOIN Platform p ON p.Id = w.PlatformId
 INNER JOIN (
@@ -72,6 +66,7 @@ INNER JOIN (
        AND w.UpdatedAt = latest.LastUpdatedAt
 ORDER BY p.PlatformName;
 ```
+![Query Result](images/result_part2.png)
 
 The subquery groups wells by platform and finds the most recent `UpdatedAt` value for each. The outer query then joins back to get the full well details for that row.
 
