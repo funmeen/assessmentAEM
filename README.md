@@ -29,6 +29,9 @@ Once I understood the data shape, I designed two tables â€” Platform and Well â€
 3. For each platform and its nested wells, it upserts into the database (insert if new, update if exists)
 4. It then calls `GetPlatformWellDummy` to verify the app handles missing or extra JSON fields without breaking
 
+![Query Result](images/GetPlatformWellActual.png)
+![Query Result](images/GetPlatformWellDummy.png)
+
 ### Resilience to API changes
 All DTO properties are nullable, so missing JSON keys don't cause errors. `[JsonExtensionData]` absorbs any new unknown fields silently. `MissingMemberHandling.Ignore` is set on the deserializer as an extra safety net.
 
@@ -69,8 +72,6 @@ ORDER BY p.PlatformName;
 ![Query Result](images/result_part2.png)
 
 The subquery groups wells by platform and finds the most recent `UpdatedAt` value for each. The outer query then joins back to get the full well details for that row.
-
-A second alternative using `ROW_NUMBER() OVER (PARTITION BY)` is also included in `Part2_LastUpdatedWellPerPlatform.sql` for cases where multiple wells share the same timestamp.
 
 ---
 
